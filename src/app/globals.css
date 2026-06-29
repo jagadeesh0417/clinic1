@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 98%;        /* warm white */
+    --foreground: 0 0% 12%;          /* charcoal */
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 12%;
+    --primary: 36 52% 47%;           /* gold #B58B3A */
+    --primary-foreground: 40 33% 98%;
+    --secondary: 40 28% 90%;         /* beige */
+    --secondary-foreground: 0 0% 12%;
+    --muted: 40 25% 94%;
+    --muted-foreground: 0 0% 42%;
+    --accent: 41 54% 63%;            /* champagne */
+    --accent-foreground: 0 0% 12%;
+    --border: 40 22% 88%;
+    --input: 40 22% 88%;
+    --ring: 36 52% 47%;
+    --radius: 0.9rem;
+  }
+
+  .dark {
+    --background: 0 0% 7%;
+    --foreground: 40 33% 96%;
+    --card: 0 0% 10%;
+    --card-foreground: 40 33% 96%;
+    --primary: 41 54% 63%;
+    --primary-foreground: 0 0% 7%;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 40 33% 96%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 40 10% 65%;
+    --accent: 36 52% 47%;
+    --accent-foreground: 40 33% 96%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 41 54% 63%;
+  }
+
+  * {
+    @apply border-border;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+    font-feature-settings: "ss01", "cv01";
+  }
+  ::selection {
+    background: rgba(181, 139, 58, 0.18);
+  }
+}
+
+@layer components {
+  /* Eyebrow / kicker label used above section headings */
+  .eyebrow {
+    @apply font-eyebrow uppercase tracking-luxe text-xs text-gold-600;
+  }
+
+  /* Hairline gold divider */
+  .gold-rule {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(181, 139, 58, 0.55),
+      transparent
+    );
+  }
+
+  /* Gold text for accents */
+  .text-gold-gradient {
+    background: linear-gradient(135deg, #9a742f 0%, #d6b46a 60%, #b58b3a 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Elevated luxury card */
+  .luxe-card {
+    @apply rounded-[30px] border border-beige/80 bg-warmwhite shadow-card transition-all duration-500;
+  }
+  .luxe-card:hover {
+    @apply shadow-luxe -translate-y-1 border-gold-200;
+  }
+
+  /* Glass panel */
+  .glass {
+    background: rgba(253, 252, 249, 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(214, 180, 106, 0.25);
+  }
+
+  /* Primary gold button */
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-gold-gradient px-7 py-3.5
+      font-sans text-sm font-semibold tracking-wide text-white shadow-gold transition-all duration-300
+      hover:shadow-luxe hover:brightness-105 active:scale-[0.98];
+  }
+  .btn-outline-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-gold-400/60 bg-transparent
+      px-7 py-3.5 font-sans text-sm font-semibold tracking-wide text-gold-700 transition-all duration-300
+      hover:border-gold-500 hover:bg-gold-50;
+  }
+
+  /* Section vertical rhythm */
+  .section {
+    @apply py-24 md:py-32;
+  }
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

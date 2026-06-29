@@ -1,0 +1,630 @@
+// KO Clinics — Prisma schema
+// PostgreSQL (Supabase). Run: npx prisma db push && npx prisma db seed
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Supabase pooled vs direct connection
+}
+
+// ─────────────────────────────────────────────────────────────
+// AUTH & RBAC
+// ─────────────────────────────────────────────────────────────
+
+enum Role {
+  PATIENT
+  PARTNER // clinic owner / operator
+  CLINIC_STAFF
+  DOCTOR
+  REGIONAL_ADMIN
+  COUNTRY_ADMIN
+  SUPER_ADMIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  phone         String?   @unique
+  passwordHash  String?
+  name          String?
+  image         String?
+  role          Role      @default(PATIENT)
+  emailVerified DateTime?
+  locale        String    @default("en")
+  isActive      Boolean   @default(true)
+
+  accounts      Account[]
+  sessions      Session[]
+
+  // role-specific profiles
+  partner       Partner?
+  doctorProfile Doctor?
+  patient       Patient?
+
+  // activity
+  leadsAssigned    Lead[]          @relation("LeadAssignee")
+  appointments     Appointment[]   @relation("AppointmentPatient")
+  healthReports    HealthReport[]
+  orders           Order[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  supportTickets   SupportTicket[]
+  subscriptions    Subscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────
+// GEOGRAPHY (RBAC scoping: country / region)
+// ─────────────────────────────────────────────────────────────
+
+model Country {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String   @unique // IN, HK, AE, CA
+  regions   Region[]
+  clinics   Clinic[]
+  createdAt DateTime @default(now())
+}
+
+model Region {
+  id        String   @id @default(cuid())
+  name      String
+  countryId String
+  country   Country  @relation(fields: [countryId], references: [id])
+  clinics   Clinic[]
+
+  @@unique([name, countryId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PARTNERS & CLINICS
+// ─────────────────────────────────────────────────────────────
+
+enum PartnerStatus {
+  PENDING        // registration submitted
+  UNDER_REVIEW   // business evaluation
+  SITE_INSPECTION
+  PROPOSAL
+  AGREEMENT
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+  REJECTED
+}
+
+model Partner {
+  id            String        @id @default(cuid())
+  userId        String        @unique
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  legalName     String
+  contactPerson String
+  phone         String
+  status        PartnerStatus @default(PENDING)
+  onboardingStep Int          @default(1) // 1..9 registration funnel
+
+  clinics       Clinic[]
+  referralCode  String        @unique @default(cuid())
+  referredById  String?
+  membership    Membership?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+enum ClinicType {
+  HOSPITAL
+  AESTHETIC
+  DERMATOLOGY
+  DENTAL
+  WELLNESS
+  DIAGNOSTIC
+  SPECIALIST
+}
+
+model Clinic {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  name        String
+  type        ClinicType
+  partnerId   String
+  partner     Partner    @relation(fields: [partnerId], references: [id])
+
+  countryId   String
+  country     Country    @relation(fields: [countryId], references: [id])
+  regionId    String?
+  region      Region?    @relation(fields: [regionId], references: [id])
+
+  addressLine String
+  city        String
+  pincode     String?
+  latitude    Float?
+  longitude   Float?
+
+  phone       String?
+  email       String?
+  description String?    @db.Text
+  coverImage  String?
+  gallery     String[]
+  licenseUrl  String?
+  rating      Float      @default(0)
+  reviewCount Int        @default(0)
+  isPublished Boolean    @default(false)
+  isVerified  Boolean    @default(false)
+
+  services       ClinicService[]
+  doctors        DoctorClinic[]
+  appointments   Appointment[]
+  leads          Lead[]
+  equipmentRentals EquipmentRental[]
+  roomRentals    RoomRental[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([city])
+  @@index([type])
+  @@index([isPublished])
+}
+
+// ─────────────────────────────────────────────────────────────
+// SERVICES & CATALOG
+// ─────────────────────────────────────────────────────────────
+
+model ServiceCategory {
+  id       String    @id @default(cuid())
+  slug     String    @unique
+  name     String // Dermatology, Hair, Anti-Ageing, Slimming, Wellness
+  icon     String?
+  order    Int       @default(0)
+  services Service[]
+}
+
+model Service {
+  id          String          @id @default(cuid())
+  slug        String          @unique
+  name        String
+  categoryId  String
+  category    ServiceCategory @relation(fields: [categoryId], references: [id])
+  description String?         @db.Text
+  clinics     ClinicService[]
+}
+
+model ClinicService {
+  id        String  @id @default(cuid())
+  clinicId  String
+  serviceId String
+  price     Decimal? @db.Decimal(10, 2)
+  clinic    Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  @@unique([clinicId, serviceId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// DOCTORS / NETWORK
+// ─────────────────────────────────────────────────────────────
+
+model Doctor {
+  id            String         @id @default(cuid())
+  userId        String?        @unique
+  user          User?          @relation(fields: [userId], references: [id])
+  name          String
+  speciality    String
+  qualification String?
+  experience    Int? // years
+  bio           String?        @db.Text
+  image         String?
+  isVisiting    Boolean        @default(false) // consultation space rental
+  clinics       DoctorClinic[]
+  appointments  Appointment[]
+
+  createdAt DateTime @default(now())
+}
+
+model DoctorClinic {
+  id       String @id @default(cuid())
+  doctorId String
+  clinicId String
+  doctor   Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, clinicId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// LEADS / CRM
+// ─────────────────────────────────────────────────────────────
+
+enum LeadSource {
+  WEBSITE
+  WALK_IN
+  TELECONSULT
+  CORPORATE
+  HEALTH_CAMP
+  MEDICAL_TOURISM
+  REFERRAL
+  CALL_CENTRE
+  INSURANCE
+  CAMPAIGN
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  BOOKED
+  CONVERTED
+  LOST
+}
+
+model Lead {
+  id         String     @id @default(cuid())
+  name       String
+  phone      String
+  email      String?
+  source     LeadSource @default(WEBSITE)
+  status     LeadStatus @default(NEW)
+  note       String?    @db.Text
+  serviceTag String?
+
+  clinicId   String?
+  clinic     Clinic?    @relation(fields: [clinicId], references: [id])
+  assigneeId String?
+  assignee   User?      @relation("LeadAssignee", fields: [assigneeId], references: [id])
+
+  campaignId String?
+  campaign   Campaign?  @relation(fields: [campaignId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([source])
+  @@index([clinicId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// APPOINTMENTS & TELECONSULT
+// ─────────────────────────────────────────────────────────────
+
+enum AppointmentMode {
+  IN_CLINIC
+  TELECONSULT
+  HOME_VISIT
+}
+
+enum AppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Patient {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth   DateTime?
+  gender        String?
+  bloodGroup    String?
+  medicalNotes  String?  @db.Text
+  createdAt     DateTime @default(now())
+}
+
+model Appointment {
+  id        String            @id @default(cuid())
+  patientId String
+  patient   User              @relation("AppointmentPatient", fields: [patientId], references: [id])
+  clinicId  String?
+  clinic    Clinic?           @relation(fields: [clinicId], references: [id])
+  doctorId  String?
+  doctor    Doctor?           @relation(fields: [doctorId], references: [id])
+  mode      AppointmentMode   @default(IN_CLINIC)
+  status    AppointmentStatus @default(REQUESTED)
+  scheduledAt DateTime
+  reason    String?
+  createdAt DateTime          @default(now())
+
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// AI HEALTHCARE — QScan / Health ATM
+// ─────────────────────────────────────────────────────────────
+
+model HealthReport {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  source        String   @default("QSCAN") // QSCAN | HEALTH_ATM
+  healthScore   Int? // 0..100
+  vitals        Json? // BP, HR, SpO2, temperature...
+  bodyComposition Json? // BMI, fat%, muscle...
+  riskFlags     String[]
+  recommendations String[] @db.Text
+  pdfUrl        String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PRODUCTS / COMMERCE
+// ─────────────────────────────────────────────────────────────
+
+model ProductCategory {
+  id       String    @id @default(cuid())
+  slug     String    @unique
+  name     String
+  products Product[]
+}
+
+model Product {
+  id            String          @id @default(cuid())
+  slug          String          @unique
+  name          String
+  categoryId    String
+  category      ProductCategory @relation(fields: [categoryId], references: [id])
+  description   String?         @db.Text
+  image         String?
+  mrp           Decimal         @db.Decimal(10, 2)
+  partnerPrice  Decimal         @db.Decimal(10, 2) // wholesale / partner pricing
+  stock         Int             @default(0)
+  isActive      Boolean         @default(true)
+  orderItems    OrderItem[]
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model Order {
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id])
+  status     OrderStatus @default(PENDING)
+  total      Decimal     @db.Decimal(10, 2)
+  items      OrderItem[]
+  payment    Payment?
+  createdAt  DateTime    @default(now())
+
+  @@index([status])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int     @default(1)
+  unitPrice Decimal @db.Decimal(10, 2)
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────
+// EQUIPMENT & ROOM RENTAL
+// ─────────────────────────────────────────────────────────────
+
+model Equipment {
+  id          String            @id @default(cuid())
+  name        String // HIFU, Pico Laser, Hydrafacial...
+  category    String
+  description String?           @db.Text
+  image       String?
+  dailyRate   Decimal           @db.Decimal(10, 2)
+  rentals     EquipmentRental[]
+}
+
+model EquipmentRental {
+  id          String    @id @default(cuid())
+  equipmentId String
+  clinicId    String
+  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+  clinic      Clinic    @relation(fields: [clinicId], references: [id])
+  startDate   DateTime
+  endDate     DateTime
+  status      String    @default("REQUESTED")
+  createdAt   DateTime  @default(now())
+}
+
+model RoomRental {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+  speciality String // dermatology, dentistry...
+  date      DateTime
+  slot      String
+  status    String   @default("AVAILABLE")
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────
+// MEMBERSHIP & BILLING
+// ─────────────────────────────────────────────────────────────
+
+model MembershipPlan {
+  id          String       @id @default(cuid())
+  name        String       @unique // Growth, Pro, Enterprise
+  priceMonthly Decimal     @db.Decimal(10, 2)
+  features    String[]
+  memberships Membership[]
+}
+
+model Membership {
+  id        String         @id @default(cuid())
+  partnerId String         @unique
+  partner   Partner        @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  planId    String
+  plan      MembershipPlan @relation(fields: [planId], references: [id])
+  active    Boolean        @default(true)
+  startedAt DateTime       @default(now())
+  expiresAt DateTime?
+}
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id])
+  stripeSubscriptionId String?  @unique
+  stripeCustomerId     String?
+  status               String   @default("active")
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime @default(now())
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  orderId         String?  @unique
+  order           Order?   @relation(fields: [orderId], references: [id])
+  provider        String   @default("stripe") // stripe | razorpay
+  providerRef     String?
+  amount          Decimal  @db.Decimal(10, 2)
+  currency        String   @default("INR")
+  status          String   @default("created")
+  createdAt       DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARKETING / CAMPAIGNS / CMS
+// ─────────────────────────────────────────────────────────────
+
+model Campaign {
+  id        String   @id @default(cuid())
+  name      String
+  channel   String // google, meta, whatsapp, email
+  budget    Decimal? @db.Decimal(10, 2)
+  startDate DateTime?
+  endDate   DateTime?
+  leads     Lead[]
+  createdAt DateTime @default(now())
+}
+
+model Post {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  excerpt     String?
+  body        String   @db.Text
+  coverImage  String?
+  category    String   @default("Blog") // Blog | Media | Case Study | Partner Story
+  published   Boolean  @default(false)
+  publishedAt DateTime?
+  seoTitle    String?
+  seoDesc     String?
+  createdAt   DateTime @default(now())
+
+  @@index([category])
+  @@index([published])
+}
+
+model FAQ {
+  id       String @id @default(cuid())
+  question String
+  answer   String @db.Text
+  category String @default("General")
+  order    Int    @default(0)
+}
+
+model Career {
+  id          String   @id @default(cuid())
+  title       String
+  location    String
+  type        String   @default("Full-time")
+  department  String
+  description String   @db.Text
+  isOpen      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────
+// SUPPORT, NOTIFICATIONS, AUDIT
+// ─────────────────────────────────────────────────────────────
+
+model SupportTicket {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  subject   String
+  message   String   @db.Text
+  status    String   @default("OPEN")
+  priority  String   @default("NORMAL")
+  createdAt DateTime @default(now())
+
+  @@index([status])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  body      String?
+  type      String   @default("info")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity])
+}
